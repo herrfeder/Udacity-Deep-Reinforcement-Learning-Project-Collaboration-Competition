@@ -60,26 +60,28 @@ class Agent():
         self.noise_scalar = hyperparameters["noise_scalar"]
         self.hyperparameters = hyperparameters
 
-        # Actor Network (w/ Target Network)
-        self.actor_local = Actor(state_size, action_size, random_seed, fc1_units=self.lin_full_con_01, fc2_units=self.lin_full_con_02).to(device)
-        self.actor_target = Actor(state_size, action_size, random_seed, fc1_units=self.lin_full_con_01, fc2_units=self.lin_full_con_02).to(device)
-        self.actor_optimizer = optim.Adam(self.actor_local.parameters(), lr=self.lr_actor)
+        # Actor Network
+        self.actor = Actor(state_size, action_size, self.seed, fc1_units=self.lin_full_con_01, fc2_units=self.lin_full_con_02).to(device)
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=self.lr_actor)
 
-        # Critic Network (w/ Target Network)
-        self.critic_local = Critic(state_size, action_size, random_seed, fc1_units=self.lin_full_con_01, fc2_units=self.lin_full_con_02).to(device)
-        self.critic_target = Critic(state_size, action_size, random_seed, fc1_units=self.lin_full_con_01, fc2_units=self.lin_full_con_02).to(device)
-        self.critic_optimizer = optim.Adam(self.critic_local.parameters(), lr=self.lr_critic, weight_decay=self.weight_decay)
-        
-        self.hard_copy_weights(self.actor_target, self.actor_local)
-        self.hard_copy_weights(self.critic_target, self.critic_local)
+        # Critics (One per agent)
+        self.critic_01 = CriticQ(state_size, action_size, self.seed, fc1_units=self.lin_full_con_01, fc2_units=self.lin_full_con_02).to(device)
+        self.critic_02 = CriticQ(state_size, action_size, self.seed, fc1_units=self.lin_full_con_01, fc2_units=self.lin_full_con_02).to(device)
+        self.critic_01_optimizer = optim.Adam(self.critic_01.parameters(), lr=self.lr_critic)
+        self.critic_02_optimizer = optim.Adam(self.critic_02.parameters(), lr=self.lr_critic)
+
+        # Value Network (with target)
+        self.value_local = Value(state_size, action_size, self.seed, fc1_units=self.lin_full_con_01, fc2_units=self.lin_full_con_02).to(device)
+        self.value_target = Value(state_size, action_size, self.seed, fc1_units=self.lin_full_con_01, fc2_units=self.lin_full_con_02).to(device)
+        self.hard_copy_weights(self.value_target, self.value_local)
+        self.value_optimizer = optim.Adam(self.value_local.parameters(), lr=self.lr_value)
 
         # Replay memory
-        self.memory = ReplayBuffer(self.action_size, self.buffer_size, self.batch_size, random_seed)
+        self.memory = ReplayBuffer(self.action_size, self.buffer_size, self.batch_size, self.seed)
     
     def load_checkpoints(self):
         self.actor_local.load_state_dict(torch.load('checkpoint_actor.pth'))
         self.critic_local.load_state_dict(torch.load('checkpoint_critic.pth'))
-    
     
     def hard_copy_weights(self, target, source):
         """ copy weights from source to target network (part of initialization)"""
