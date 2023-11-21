@@ -76,6 +76,8 @@ class Agent():
         self.hard_copy_weights(self.value_target, self.value_local)
         self.value_optimizer = optim.Adam(self.value_local.parameters(), lr=self.lr_value)
 
+        # Logarithmic 
+
         # Replay memory
         self.memory = ReplayBuffer(self.action_size, self.buffer_size, self.batch_size, self.seed)
     
@@ -112,7 +114,7 @@ class Agent():
     def reset(self):
         pass
 
-    def learn(self, experiences, gamma):
+    def learn(self, experiences):
         """Update policy and value parameters using given batch of experience tuples.
         Q_targets = r + γ * critic_target(next_state, actor_target(next_state))
         where:
@@ -124,6 +126,7 @@ class Agent():
             gamma (float): discount factor
         """
         states, actions, rewards, next_states, dones = experiences
+        new_action, log_prob = self.actor(states)
         # ---------------------------- update critic ---------------------------- #
         # Get predicted next-state actions and Q values from target models
         actions_next = self.actor_target(next_states)
@@ -141,16 +144,26 @@ class Agent():
 
         # ---------------------------- update actor ---------------------------- #
         # Compute actor loss
-        actions_pred = self.actor_local(states)
-        actor_loss = -self.critic_local(states, actions_pred).mean()
+        advantage = q_pred - v_pred.detach()
+        actor_loss = (alpha * log_prob - advantage).mean()
         # Minimize the loss
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
         self.actor_optimizer.step()
+        # ---------------------------- update critics -------------------------- #
+        self.critic_01_optimizer.zero_grad() 
+        critc_01_loss.backward()
+        self.critic_01_optimizer.step()
+        self.critic_02_optimizer.zero_grad() 
+        critc_02_loss.backward()
+        self.critic_02_optimizer.step()
 
-        # ----------------------- update target networks ----------------------- #
-        self.soft_update(self.critic_local, self.critic_target)
-        self.soft_update(self.actor_local, self.actor_target)                     
+        critic_loss = critic_01_loss + crictic_02_loss
+        # ----------------------- update value network ----------------------- #
+        self.soft_update(self.value_local, self.value_target)
+        self.value_optimizer.zero_grad()
+        value_loss.backward()
+        self.value_optimizer.step()
 
     def soft_update(self, local_model, target_model):
         """Soft update model parameters.
