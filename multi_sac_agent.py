@@ -6,7 +6,7 @@ import torch
 import torch.nn.functional as F
 import torch.optim as optim
 
-from model import Actor, Critic
+from model import Actor, CriticQ, Value
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -22,8 +22,9 @@ class Agent():
                 "lin_full_con_02": 128,
                 "gamma": 0.99,
                 "tau": 1e-3,
-                "lr_actor": 1e-3,
-                "lr_critic": 1e-3,
+                "lr_actor": 3e-4,
+                "lr_critic": 3e-4,
+                "lr_value": 3e-4,
                 "weight_decay": 0,
                 "noise_scalar": 0.25}
             ):
@@ -42,12 +43,13 @@ class Agent():
             tau (float): interpolation factor for soft update of target parameters
             lr_actor (float): learning rate of actor
             lr_critic (float): learning rate of critic
+            lr_value (float): learning rate of value
             weight_decay (int): L2 weight decay
             noise_scalar (float): Constant noise added to choosen action
         """
         self.state_size = state_size
         self.action_size = action_size
-        self.seed = random.seed(random_seed)
+        self.seed = random_seed
         self.buffer_size = hyperparameters["buffer_size"]
         self.batch_size = hyperparameters["batch_size"]
         self.gamma = hyperparameters["gamma"]
@@ -56,29 +58,35 @@ class Agent():
         self.lin_full_con_02 = hyperparameters["lin_full_con_02"]
         self.lr_actor = hyperparameters["lr_actor"]
         self.lr_critic = hyperparameters["lr_critic"]
+        self.lr_value = hyperparameters["lr_value"]
         self.weight_decay = hyperparameters["weight_decay"]
         self.noise_scalar = hyperparameters["noise_scalar"]
         self.hyperparameters = hyperparameters
 
+        self.initial_random_steps = 10
+        self.num_agents = 2
+        self.transition =[[]]*self.num_agents
+        print(self.transition)
+
         # Actor Network
-        self.actor = Actor(state_size, action_size, self.seed, fc1_units=self.lin_full_con_01, fc2_units=self.lin_full_con_02).to(device)
+        self.actor = Actor(state_size, action_size, seed=self.seed, fc1_units=self.lin_full_con_01, fc2_units=self.lin_full_con_02).to(device)
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=self.lr_actor)
 
         # Critics (One per agent)
-        self.critic_01 = CriticQ(state_size, action_size, self.seed, fc1_units=self.lin_full_con_01, fc2_units=self.lin_full_con_02).to(device)
-        self.critic_02 = CriticQ(state_size, action_size, self.seed, fc1_units=self.lin_full_con_01, fc2_units=self.lin_full_con_02).to(device)
+        self.critic_01 = CriticQ(state_size, action_size, seed=self.seed, fc1_units=self.lin_full_con_01, fc2_units=self.lin_full_con_02).to(device)
+        self.critic_02 = CriticQ(state_size, action_size, seed=self.seed, fc1_units=self.lin_full_con_01, fc2_units=self.lin_full_con_02).to(device)
         self.critic_01_optimizer = optim.Adam(self.critic_01.parameters(), lr=self.lr_critic)
         self.critic_02_optimizer = optim.Adam(self.critic_02.parameters(), lr=self.lr_critic)
 
         # Value Network (with target)
-        self.value_local = Value(state_size, action_size, self.seed, fc1_units=self.lin_full_con_01, fc2_units=self.lin_full_con_02).to(device)
-        self.value_target = Value(state_size, action_size, self.seed, fc1_units=self.lin_full_con_01, fc2_units=self.lin_full_con_02).to(device)
+        self.value_local = Value(state_size, action_size, seed=self.seed, fc1_units=self.lin_full_con_01, fc2_units=self.lin_full_con_02).to(device)
+        self.value_target = Value(state_size, action_size, seed=self.seed, fc1_units=self.lin_full_con_01, fc2_units=self.lin_full_con_02).to(device)
         self.hard_copy_weights(self.value_target, self.value_local)
         self.value_optimizer = optim.Adam(self.value_local.parameters(), lr=self.lr_value)
 
         # Logarithmic Tensor
         self.target_alpha = -np.prod((self.action_size,)).item()
-        self.log_alpha = torch.zeros(1, requires_grad=True, device=self.device)
+        self.log_alpha = torch.zeros(1, requires_grad=True, device=device)
         self.log_optimizer = optim.Adam([self.log_alpha], lr=3e-4)
 
         # Replay memory
@@ -97,23 +105,23 @@ class Agent():
         """Save experience in replay memory, and use random sample from buffer to learn."""
         for i in range(self.num_agents):
             self.transition[i] += [reward[i], next_state[i], done[i]]
-            self.memory.store(*self.transition[i])
+            self.memory.add(*self.transition[i])
 
         if len(self.memory) > self.batch_size:
             experiences = self.memory.sample()
             self.learn(experiences)
 
-    def act(self, state):
+    def act(self, state, step):
         """Returns actions for given state as per current policy."""
         #state = torch.from_numpy(state).float().to(device)
         #self.actor.eval()
-        if self.total_step < self.initial_random_steps and not self.is_test:
+        if step < self.initial_random_steps:
             selected_action = np.random.uniform(-1, 1, (self.num_agents, self.action_size))
         else:
             selected_action = []
             for i in range(self.num_agents):
                 action = self.actor(
-                    torch.FloatTensor(state[i]).to(self.device)
+                    torch.FloatTensor(state[i]).to(device)
                 )[0].detach().cpu().numpy()
                 selected_action.append(action)
             selected_action = np.array(selected_action)

@@ -1,14 +1,14 @@
 from unityagents import UnityEnvironment
 import numpy as np
 import numpy as np
-from ddpg_agent import Agent
+from multi_sac_agent import Agent
 from collections import deque
 import torch
 from pprint import PrettyPrinter
 
 def init_environment(hyperparameters=""):
     # initialise the headless unity environment
-    env = UnityEnvironment(file_name='Reacher_Linux/Reacher.x86_64')
+    env = UnityEnvironment(file_name='Tennis_Linux/Tennis.x86_64')
 
     # get the default environment, called brain
     brain_name = env.brain_names[0]
@@ -23,7 +23,8 @@ def init_environment(hyperparameters=""):
     # initialize agent with environment facts and hyperparameters for actor critic model components
     if hyperparameters:
         agent = Agent(state_size=state_size, action_size=action_size, random_seed=0, hyperparameters=hyperparameters)
-    
+    else:
+        agent = Agent(state_size=state_size, action_size=action_size, random_seed=0)
     init_output = \
     """##Reacher Environment##
 
@@ -61,26 +62,28 @@ def multi_sac_runtime(n_episodes=1000, reward_goal=30, max_t=1000, window_size=1
     agent, env, brain_name = init_environment()
     scores = []
     scores_deque = deque(maxlen=window_size)
-    
+    num_agents = 2
+    step = 0
     for i_episode in range(n_episodes):
         env_info = env.reset(train_mode=True)[brain_name]
         state = env_info.vector_observations[0]
-        score = [0]*self.num_agents
+        score = [0]*num_agents
         
         for t in range(max_t):
-            self.step += 1
+            step += 1
             # select an action
-            action = agent.act(state)
+            action = agent.act(state, step)
             # run action in used Unity Environment
+            print(action)
             env_info = env.step(action)[brain_name]
             next_state = env_info.vector_observations
             reward = env_info.rewards
             done = env_info.local_done
             # run action in Multi SAC agent (also learning models)
             agent.step(state, action, reward, next_state, done, t)
-            score = [(score[i] + reward[i]) for i in range(self.num_agents)]
+            score = [(score[i] + reward[i]) for i in range(num_agents)]
             state = next_state
-            if np.any(done)
+            if np.any(done):
                 break
         
         # save score for total runtime
@@ -110,4 +113,4 @@ def multi_sac_runtime(n_episodes=1000, reward_goal=30, max_t=1000, window_size=1
 
 
 if __name__ == "__main__":
-    scores = ddpg_runtime(n_episodes=1000)
+    scores = multi_sac_runtime(n_episodes=1000)

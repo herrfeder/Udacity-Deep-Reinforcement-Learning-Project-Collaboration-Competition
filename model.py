@@ -11,7 +11,7 @@ def hidden_init(layer):
 class Actor(nn.Module):
     """Actor (Policy) Model."""
 
-    def __init__(self, state_size, action_size, noise=1e-7, fc1_units=128, fc2_units=128):
+    def __init__(self, state_size, action_size, seed=0, noise=1e-7, fc1_units=128, fc2_units=128):
         """Initialize parameters and build model.
         Params
         ======
@@ -39,12 +39,12 @@ class Actor(nn.Module):
 
     def sample_normal(self, state):
         
-        mu = self.mu(x).tanh()
-        log_std = self.sigma(x).tanh()
+        mu = self.mu(state).tanh()
+        log_std = self.sigma(state).tanh()
         # maybe add log_std scaling
         std = torch.exp(log_std)
 
-        dist = torch.distributions.Normal(mu, sigma)
+        dist = torch.distributions.Normal(mu, std)
         z = dist.rsample()
         action = z.tanh()
         
@@ -77,6 +77,7 @@ class Critic(nn.Module):
             fc2_units (int): Number of nodes in the second hidden layer
         """
         super(Critic, self).__init__()
+        print(seed)
         self.seed = torch.manual_seed(seed)
         self.fc1 = nn.Linear(state_size, fc1_units)
         self.fc2 = nn.Linear(fc1_units+action_size, fc2_units)
@@ -85,7 +86,7 @@ class Critic(nn.Module):
         self.reset_parameters()
 
     def reset_parameters(self):
-        self.fcs1.weight.data.uniform_(*hidden_init(self.fc1))
+        self.fc1.weight.data.uniform_(*hidden_init(self.fc1))
         self.fc2.weight.data.uniform_(*hidden_init(self.fc2))
         self.fc3.weight.data.uniform_(-3e-3, 3e-3)
 
@@ -103,7 +104,8 @@ class CriticQ(Critic):
             fc1_units (int): Number of nodes in the first hidden layer
             fc2_units (int): Number of nodes in the second hidden layer
         """
-        super(Critic, self).__init__()
+        print(seed)
+        super(CriticQ, self).__init__(state_size, action_size, seed=seed, fc1_units=fc1_units, fc2_units=fc2_units)
 
     def forward(self, state, action):
         """Build a critic (value) network that maps (state, action) pairs -> Q-values."""
@@ -129,7 +131,7 @@ class Value(Critic):
             fc1_units (int): Number of nodes in the first hidden layer
             fc2_units (int): Number of nodes in the second hidden layer
         """
-        super(Critic, self).__init__()
+        super(Value, self).__init__(state_size, action_size, seed, fc1_units, fc2_units)
 
     def forward(self, state):
         """Build a critic (value) network that maps (state, action) pairs -> Q-values."""
