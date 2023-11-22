@@ -76,7 +76,10 @@ class Agent():
         self.hard_copy_weights(self.value_target, self.value_local)
         self.value_optimizer = optim.Adam(self.value_local.parameters(), lr=self.lr_value)
 
-        # Logarithmic 
+        # Logarithmic Tensor
+        self.target_alpha = -np.prod((self.action_size,)).item()
+        self.log_alpha = torch.zeros(1, requires_grad=True, device=self.device)
+        self.log_optimizer = optim.Adam([self.log_alpha], lr=3e-4)
 
         # Replay memory
         self.memory = ReplayBuffer(self.action_size, self.buffer_size, self.batch_size, self.seed)
@@ -92,24 +95,34 @@ class Agent():
     
     def step(self, state, action, reward, next_state, done, timestep):
         """Save experience in replay memory, and use random sample from buffer to learn."""
-        # Save experience / reward
-        self.memory.add(state, action, reward, next_state, done)
+        for i in range(self.num_agents):
+            self.transition[i] += [reward[i], next_state[i], done[i]]
+            self.memory.store(*self.transition[i])
 
-        # Learn, if enough samples are available in memory
         if len(self.memory) > self.batch_size:
             experiences = self.memory.sample()
-            self.learn(experiences, self.gamma)
+            self.learn(experiences)
 
-    def act(self, state, add_noise=True):
+    def act(self, state):
         """Returns actions for given state as per current policy."""
-        state = torch.from_numpy(state).float().to(device)
-        self.actor_local.eval()
-        with torch.no_grad():
-            action = self.actor_local(state).cpu().data.numpy()
-        self.actor_local.train()
-        if add_noise:
-            action += np.random.randn(self.action_size) * self.noise_scalar
-        return np.clip(action, -1, 1)
+        #state = torch.from_numpy(state).float().to(device)
+        #self.actor.eval()
+        if self.total_step < self.initial_random_steps and not self.is_test:
+            selected_action = np.random.uniform(-1, 1, (self.num_agents, self.action_size))
+        else:
+            selected_action = []
+            for i in range(self.num_agents):
+                action = self.actor(
+                    torch.FloatTensor(state[i]).to(self.device)
+                )[0].detach().cpu().numpy()
+                selected_action.append(action)
+            selected_action = np.array(selected_action)
+            selected_action = np.clip(selected_action, -1, 1)
+
+        for i in range(self.num_agents):
+            self.transition[i] = [state[i], selected_action[i]]
+        
+        return selected_action
 
     def reset(self):
         pass
@@ -127,21 +140,29 @@ class Agent():
         """
         states, actions, rewards, next_states, dones = experiences
         new_action, log_prob = self.actor(states)
-        # ---------------------------- update critic ---------------------------- #
-        # Get predicted next-state actions and Q values from target models
-        actions_next = self.actor_target(next_states)
-        Q_targets_next = self.critic_target(next_states, actions_next)
-        # Compute Q targets for current states (y_i)
-        Q_targets = rewards + (gamma * Q_targets_next * (1 - dones))
-        # Compute critic loss
-        Q_expected = self.critic_local(states, actions)
-        critic_loss = F.mse_loss(Q_expected, Q_targets)
-        # Minimize the loss
-        self.critic_optimizer.zero_grad()
-        critic_loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.critic_local.parameters(), 1)
-        self.critic_optimizer.step()
+        # ---------------------------- update probability function ------------- #
+        alpha_loss = (
+            -self.log_alpha.exp() * (log_prob + self.target_alpha).detach()
+        ).mean()
+        self.log_optimizer.zero_grad()
+        alpha_loss.backward()
+        self.log_optimizer.step()
+        # ---------------------------- calculate losses ------------------------ #
+        alpha = self.log_alpha.exp()
+        mask = 1 - dones
+        critic_01_pred = self.critic_01(states, actions)
+        critic_02_pred = self.critic_02(states, actions)
+        value_target = self.value_target(next_states)
+        q_target = reward + self.gamma * value_target * mask
+        critic_01_loss = F.mse_loss(q_target.detach(), critic_01_pred)
+        critic_02_loss = F.mse_loss(q_target.detach(), critic_02_pred)
 
+        value_pred = self.value_local(states)
+        critic_pred = torch.min(
+            self.critic_01(state, new_action), self.critic_02(state, new_action)
+        )
+        value_target = critic_pred - alpha * log_prob
+        value_loss = F.mse_loss(value_pred, value_target.detach())
         # ---------------------------- update actor ---------------------------- #
         # Compute actor loss
         advantage = q_pred - v_pred.detach()

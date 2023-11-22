@@ -46,8 +46,8 @@ def init_environment(hyperparameters=""):
     return agent, env, brain_name
 
 
-def ddpg_runtime(n_episodes=1000, reward_goal=30, max_t=1000, window_size=100):
-    """Runtime for the Deep Deterministic policy gradient. 
+def multi_sac_runtime(n_episodes=1000, reward_goal=30, max_t=1000, window_size=100):
+    """Runtime for Multi-Agent Soft Actor-Critic. 
     Runs for maximum of n_episodes the ddpg agent against a Unity Reacher Environment.
     Either the number of n_episodes is reached or the mean rewards in reward_goal to finish the runtime.
     
@@ -62,31 +62,31 @@ def ddpg_runtime(n_episodes=1000, reward_goal=30, max_t=1000, window_size=100):
     scores = []
     scores_deque = deque(maxlen=window_size)
     
-    for i_episode in range(1, n_episodes+1):
+    for i_episode in range(n_episodes):
         env_info = env.reset(train_mode=True)[brain_name]
-        agent.reset()
         state = env_info.vector_observations[0]
-        score = 0
+        score = [0]*self.num_agents
         
         for t in range(max_t):
-            # select an action including noise for better explorative capabilities
-            action = agent.act(state, add_noise=True)
+            self.step += 1
+            # select an action
+            action = agent.act(state)
             # run action in used Unity Environment
             env_info = env.step(action)[brain_name]
-            next_state = env_info.vector_observations[0]
-            reward = env_info.rewards[0]
-            done = env_info.local_done[0]
-            # run action in DDPG agent (also learning models)
+            next_state = env_info.vector_observations
+            reward = env_info.rewards
+            done = env_info.local_done
+            # run action in Multi SAC agent (also learning models)
             agent.step(state, action, reward, next_state, done, t)
-            score += reward
+            score = [(score[i] + reward[i]) for i in range(self.num_agents)]
             state = next_state
-            if done:
+            if np.any(done)
                 break
         
-        # save score to mean reward calculation over n episodes
-        scores_deque.append(score)
         # save score for total runtime
         scores.append(score)
+        # save score to mean reward calculation over n episodes
+        scores_deque.append(max(score))
 
         print('\rEpisode {}\tAverage Score: {:.2f}'.format(i_episode, np.mean(scores_deque)))
         
