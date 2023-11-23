@@ -18,8 +18,8 @@ class Agent():
             hyperparameters={
                 "buffer_size": int(1e5),
                 "batch_size": 256,
-                "lin_full_con_01": 128,
-                "lin_full_con_02": 128,
+                "lin_full_con_01": 256,
+                "lin_full_con_02": 256,
                 "gamma": 0.99,
                 "tau": 1e-3,
                 "lr_actor": 3e-4,
@@ -63,24 +63,23 @@ class Agent():
         self.noise_scalar = hyperparameters["noise_scalar"]
         self.hyperparameters = hyperparameters
 
-        self.initial_random_steps = 10
+        self.initial_random_steps = 1000
         self.num_agents = 2
         self.transition =[[]]*self.num_agents
-        print(self.transition)
 
         # Actor Network
-        self.actor = Actor(state_size, action_size, seed=self.seed, fc1_units=self.lin_full_con_01, fc2_units=self.lin_full_con_02).to(device)
+        self.actor = Actor(state_size, action_size, fc1_units=self.lin_full_con_01, fc2_units=self.lin_full_con_02).to(device)
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=self.lr_actor)
 
         # Critics (One per agent)
-        self.critic_01 = CriticQ(state_size, action_size, seed=self.seed, fc1_units=self.lin_full_con_01, fc2_units=self.lin_full_con_02).to(device)
-        self.critic_02 = CriticQ(state_size, action_size, seed=self.seed, fc1_units=self.lin_full_con_01, fc2_units=self.lin_full_con_02).to(device)
+        self.critic_01 = CriticQ((state_size+action_size), seed=self.seed, fc1_units=self.lin_full_con_01, fc2_units=self.lin_full_con_02).to(device)
+        self.critic_02 = CriticQ((state_size+action_size), seed=self.seed, fc1_units=self.lin_full_con_01, fc2_units=self.lin_full_con_02).to(device)
         self.critic_01_optimizer = optim.Adam(self.critic_01.parameters(), lr=self.lr_critic)
         self.critic_02_optimizer = optim.Adam(self.critic_02.parameters(), lr=self.lr_critic)
 
         # Value Network (with target)
-        self.value_local = Value(state_size, action_size, seed=self.seed, fc1_units=self.lin_full_con_01, fc2_units=self.lin_full_con_02).to(device)
-        self.value_target = Value(state_size, action_size, seed=self.seed, fc1_units=self.lin_full_con_01, fc2_units=self.lin_full_con_02).to(device)
+        self.value_local = Value(state_size, seed=self.seed, fc1_units=self.lin_full_con_01, fc2_units=self.lin_full_con_02).to(device)
+        self.value_target = Value(state_size, seed=self.seed, fc1_units=self.lin_full_con_01, fc2_units=self.lin_full_con_02).to(device)
         self.hard_copy_weights(self.value_target, self.value_local)
         self.value_optimizer = optim.Adam(self.value_local.parameters(), lr=self.lr_value)
 
@@ -90,7 +89,7 @@ class Agent():
         self.log_optimizer = optim.Adam([self.log_alpha], lr=3e-4)
 
         # Replay memory
-        self.memory = ReplayBuffer(self.action_size, self.buffer_size, self.batch_size, self.seed)
+        self.memory = ReplayBuffer(self.state_size, self.action_size, self.buffer_size, self.batch_size)
     
     def load_checkpoints(self):
         self.actor_local.load_state_dict(torch.load('checkpoint_actor.pth'))
@@ -146,8 +145,8 @@ class Agent():
             experiences (Tuple[torch.Tensor]): tuple of (s, a, r, s', done) tuples 
             gamma (float): discount factor
         """
-        states, actions, rewards, next_states, dones = experiences
-        new_action, log_prob = self.actor(states)
+        state, next_state, action, reward, done = experiences
+        new_action, log_prob = self.actor(state)
         # ---------------------------- update probability function ------------- #
         alpha_loss = (
             -self.log_alpha.exp() * (log_prob + self.target_alpha).detach()
@@ -157,15 +156,15 @@ class Agent():
         self.log_optimizer.step()
         # ---------------------------- calculate losses ------------------------ #
         alpha = self.log_alpha.exp()
-        mask = 1 - dones
-        critic_01_pred = self.critic_01(states, actions)
-        critic_02_pred = self.critic_02(states, actions)
-        value_target = self.value_target(next_states)
+        mask = 1 - done
+        critic_01_pred = self.critic_01(state, action)
+        critic_02_pred = self.critic_02(state, action)
+        value_target = self.value_target(next_state)
         q_target = reward + self.gamma * value_target * mask
         critic_01_loss = F.mse_loss(q_target.detach(), critic_01_pred)
         critic_02_loss = F.mse_loss(q_target.detach(), critic_02_pred)
 
-        value_pred = self.value_local(states)
+        value_pred = self.value_local(state)
         critic_pred = torch.min(
             self.critic_01(state, new_action), self.critic_02(state, new_action)
         )
@@ -173,7 +172,7 @@ class Agent():
         value_loss = F.mse_loss(value_pred, value_target.detach())
         # ---------------------------- update actor ---------------------------- #
         # Compute actor loss
-        advantage = q_pred - v_pred.detach()
+        advantage = critic_pred - value_pred.detach()
         actor_loss = (alpha * log_prob - advantage).mean()
         # Minimize the loss
         self.actor_optimizer.zero_grad()
@@ -181,13 +180,13 @@ class Agent():
         self.actor_optimizer.step()
         # ---------------------------- update critics -------------------------- #
         self.critic_01_optimizer.zero_grad() 
-        critc_01_loss.backward()
+        critic_01_loss.backward()
         self.critic_01_optimizer.step()
         self.critic_02_optimizer.zero_grad() 
-        critc_02_loss.backward()
+        critic_02_loss.backward()
         self.critic_02_optimizer.step()
 
-        critic_loss = critic_01_loss + crictic_02_loss
+        critic_loss = critic_01_loss + critic_02_loss
         # ----------------------- update value network ----------------------- #
         self.soft_update(self.value_local, self.value_target)
         self.value_optimizer.zero_grad()
@@ -206,7 +205,7 @@ class Agent():
             target_param.data.copy_(self.tau*local_param.data + (1.0-self.tau)*target_param.data)
 
 
-class ReplayBuffer:
+class ReplayBufferOld:
     """Fixed-size buffer to store experience tuples."""
 
     def __init__(self, action_size, buffer_size, batch_size, seed):
@@ -242,3 +241,48 @@ class ReplayBuffer:
     def __len__(self):
         """Return the current size of internal memory."""
         return len(self.memory)
+
+
+class ReplayBuffer:
+
+    def __init__(self, obs_dim: int, action_dim: int, size: int, batch_size: int = 32):
+        self.obs_buf = np.zeros([size, obs_dim], dtype=np.float32)
+        self.next_obs_buf = np.zeros([size, obs_dim], dtype=np.float32)
+        self.rews_buf = np.zeros([size], dtype=np.float32)
+        self.acts_buf = np.zeros([size, action_dim], dtype=np.float32)
+        self.done_buf = np.zeros(size, dtype=np.float32)
+        self.max_size, self.batch_size = size, batch_size
+        self.ptr, self.size = 0, 0
+
+
+    def add(
+        self,
+        obs: np.ndarray,
+        act: np.ndarray,
+        rew: float,
+        next_obs: np.ndarray,
+        done: bool,
+    ):
+        """ Store transition """
+        self.obs_buf[self.ptr] = obs
+        self.acts_buf[self.ptr] = act
+        self.rews_buf[self.ptr] = rew
+        self.next_obs_buf[self.ptr] = next_obs
+        self.done_buf[self.ptr] = done
+        self.ptr = (self.ptr + 1) % self.max_size
+        self.size = min(self.size + 1, self.max_size)
+
+    def sample(self):
+        """ Sample from storage"""
+        idx = np.random.choice(self.size, size=self.batch_size, replace=False)
+        state = torch.FloatTensor(self.obs_buf[idx]).to(device)
+        next_state = torch.FloatTensor(self.next_obs_buf[idx]).to(device)
+        action = torch.FloatTensor(self.acts_buf[idx]).to(device)
+        reward = torch.FloatTensor(self.rews_buf[idx]).to(device)
+        done = torch.FloatTensor(self.done_buf[idx]).to(device)
+
+        return (state, next_state, action, reward, done)
+
+    def __len__(self):
+        return self.size
+

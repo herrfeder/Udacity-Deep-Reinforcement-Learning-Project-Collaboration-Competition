@@ -66,7 +66,7 @@ def multi_sac_runtime(n_episodes=1000, reward_goal=30, max_t=1000, window_size=1
     step = 0
     for i_episode in range(n_episodes):
         env_info = env.reset(train_mode=True)[brain_name]
-        state = env_info.vector_observations[0]
+        state = env_info.vector_observations
         score = [0]*num_agents
         
         for t in range(max_t):
@@ -74,7 +74,6 @@ def multi_sac_runtime(n_episodes=1000, reward_goal=30, max_t=1000, window_size=1
             # select an action
             action = agent.act(state, step)
             # run action in used Unity Environment
-            print(action)
             env_info = env.step(action)[brain_name]
             next_state = env_info.vector_observations
             reward = env_info.rewards
