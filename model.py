@@ -22,6 +22,8 @@ class Actor(nn.Module):
             fc2_units (int): Number of nodes in second hidden layer
         """
         super(Actor, self).__init__()
+        self.log_std_min = -20
+        self.log_std_max = 2
         self.noise = noise
         self.fc1 = nn.Linear(state_size, fc1_units)
         self.fc2 = nn.Linear(fc1_units, fc2_units)
@@ -40,8 +42,12 @@ class Actor(nn.Module):
     def sample_normal(self, state):
         
         mu = self.mu(state).tanh()
-        log_std = self.sigma(state).tanh()
         # maybe add log_std scaling
+        log_std = self.sigma(state).tanh()
+        #log_std = self.log_std_min  + 0.5 * (
+        #    self.log_std_max - self.log_std_min
+        #    ) * (log_std + 1)
+ 
         std = torch.exp(log_std)
 
         dist = torch.distributions.Normal(mu, std)
@@ -106,9 +112,8 @@ class CriticQ(Critic):
     def forward(self, state, action):
         """Build a critic (value) network that maps (state, action) pairs -> Q-values."""
         x = torch.cat((state, action), dim=-1)
-        print(x.shape)
         x = F.relu(self.fc1(x))
-        #x = self.bn1(x)
+        x = self.bn1(x)
         x = F.relu(self.fc2(x))
         return self.fc3(x)
 
@@ -131,6 +136,6 @@ class Value(Critic):
     def forward(self, state):
         """Build a critic (value) network that maps (state, action) pairs -> Q-values."""
         x = F.relu(self.fc1(state))
-        #x = self.bn1(x)
+        x = self.bn1(x)
         x = F.relu(self.fc2(x))
         return self.fc3(x)

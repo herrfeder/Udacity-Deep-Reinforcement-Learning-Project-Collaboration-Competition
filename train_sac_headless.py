@@ -47,7 +47,7 @@ def init_environment(hyperparameters=""):
     return agent, env, brain_name
 
 
-def multi_sac_runtime(n_episodes=1000, reward_goal=30, max_t=1000, window_size=100):
+def multi_sac_runtime(n_episodes=10000, reward_goal=0.5, max_t=10000, window_size=100):
     """Runtime for Multi-Agent Soft Actor-Critic. 
     Runs for maximum of n_episodes the ddpg agent against a Unity Reacher Environment.
     Either the number of n_episodes is reached or the mean rewards in reward_goal to finish the runtime.
@@ -100,8 +100,10 @@ def multi_sac_runtime(n_episodes=1000, reward_goal=30, max_t=1000, window_size=1
 
         if np.mean(scores_deque)>=reward_goal:
             print('\nEnvironment solved in {:d} episodes!\tAverage Score: {:.2f}'.format(i_episode, np.mean(scores_deque)))
-            torch.save(agent.actor_local.state_dict(), 'checkpoint_actor.pth')
-            torch.save(agent.critic_local.state_dict(), 'checkpoint_critic.pth')
+            torch.save(agent.actor.state_dict(), 'checkpoint_actor.pth')
+            torch.save(agent.critic_01.state_dict(), 'checkpoint_critic_01.pth')
+            torch.save(agent.critic_02.state_dict(), 'checkpoint_critic_02.pth')
+            torch.save(agent.value_local.state_dict(), 'checkpoint_value_local.pth')
             with open('final_scores.txt', 'w') as score_file:
                 for element in scores:
                     score_file.write(str(element))
@@ -112,4 +114,4 @@ def multi_sac_runtime(n_episodes=1000, reward_goal=30, max_t=1000, window_size=1
 
 
 if __name__ == "__main__":
-    scores = multi_sac_runtime(n_episodes=1000)
+    scores = multi_sac_runtime(n_episodes=10000)

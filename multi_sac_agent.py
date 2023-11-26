@@ -17,16 +17,12 @@ class Agent():
             self, state_size, action_size, random_seed,
             hyperparameters={
                 "buffer_size": int(1e5),
-                "batch_size": 256,
+                "batch_size": 64,
                 "lin_full_con_01": 256,
                 "lin_full_con_02": 256,
                 "gamma": 0.99,
-                "tau": 1e-3,
-                "lr_actor": 3e-4,
-                "lr_critic": 3e-4,
-                "lr_value": 3e-4,
-                "weight_decay": 0,
-                "noise_scalar": 0.25}
+                "tau": 5e-3,
+                "learning_rate": 3e-4,
             ):
         """Initialize an Agent object.
         
@@ -41,11 +37,7 @@ class Agent():
             lin_full_con_02 (int): Input Length second Fully Connected Layer
             gamma (float): discount factor
             tau (float): interpolation factor for soft update of target parameters
-            lr_actor (float): learning rate of actor
-            lr_critic (float): learning rate of critic
-            lr_value (float): learning rate of value
-            weight_decay (int): L2 weight decay
-            noise_scalar (float): Constant noise added to choosen action
+            learning_rate (float): learning rate for models
         """
         self.state_size = state_size
         self.action_size = action_size
@@ -56,37 +48,35 @@ class Agent():
         self.tau = hyperparameters["tau"]
         self.lin_full_con_01 = hyperparameters["lin_full_con_01"]
         self.lin_full_con_02 = hyperparameters["lin_full_con_02"]
-        self.lr_actor = hyperparameters["lr_actor"]
-        self.lr_critic = hyperparameters["lr_critic"]
-        self.lr_value = hyperparameters["lr_value"]
+        self.learning_rate = hyperparameters["learning_rate"]
         self.weight_decay = hyperparameters["weight_decay"]
         self.noise_scalar = hyperparameters["noise_scalar"]
         self.hyperparameters = hyperparameters
-
-        self.initial_random_steps = 1000
+        self.policy_update = 2
+        self.initial_random_steps = 100
         self.num_agents = 2
         self.transition =[[]]*self.num_agents
 
         # Actor Network
         self.actor = Actor(state_size, action_size, fc1_units=self.lin_full_con_01, fc2_units=self.lin_full_con_02).to(device)
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=self.lr_actor)
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=self.learning_rate)
 
         # Critics (One per agent)
-        self.critic_01 = CriticQ((state_size+action_size), seed=self.seed, fc1_units=self.lin_full_con_01, fc2_units=self.lin_full_con_02).to(device)
-        self.critic_02 = CriticQ((state_size+action_size), seed=self.seed, fc1_units=self.lin_full_con_01, fc2_units=self.lin_full_con_02).to(device)
-        self.critic_01_optimizer = optim.Adam(self.critic_01.parameters(), lr=self.lr_critic)
-        self.critic_02_optimizer = optim.Adam(self.critic_02.parameters(), lr=self.lr_critic)
+        self.critic_01 = CriticQ((self.state_size+self.action_size), seed=self.seed, fc1_units=self.lin_full_con_01, fc2_units=self.lin_full_con_02).to(device)
+        self.critic_02 = CriticQ((self.state_size+self.action_size), seed=self.seed, fc1_units=self.lin_full_con_01, fc2_units=self.lin_full_con_02).to(device)
+        self.critic_01_optimizer = optim.Adam(self.critic_01.parameters(), lr=self.learning_rate)
+        self.critic_02_optimizer = optim.Adam(self.critic_02.parameters(), lr=self.learning_rate)
 
         # Value Network (with target)
         self.value_local = Value(state_size, seed=self.seed, fc1_units=self.lin_full_con_01, fc2_units=self.lin_full_con_02).to(device)
         self.value_target = Value(state_size, seed=self.seed, fc1_units=self.lin_full_con_01, fc2_units=self.lin_full_con_02).to(device)
         self.hard_copy_weights(self.value_target, self.value_local)
-        self.value_optimizer = optim.Adam(self.value_local.parameters(), lr=self.lr_value)
+        self.value_optimizer = optim.Adam(self.value_local.parameters(), lr=self.learning_rate)
 
         # Logarithmic Tensor
         self.target_alpha = -np.prod((self.action_size,)).item()
         self.log_alpha = torch.zeros(1, requires_grad=True, device=device)
-        self.log_optimizer = optim.Adam([self.log_alpha], lr=3e-4)
+        self.log_optimizer = optim.Adam([self.log_alpha], lr=self.learning_rate)
 
         # Replay memory
         self.memory = ReplayBuffer(self.state_size, self.action_size, self.buffer_size, self.batch_size)
@@ -108,12 +98,10 @@ class Agent():
 
         if len(self.memory) > self.batch_size:
             experiences = self.memory.sample()
-            self.learn(experiences)
+            self.learn(experiences, timestep)
 
     def act(self, state, step):
         """Returns actions for given state as per current policy."""
-        #state = torch.from_numpy(state).float().to(device)
-        #self.actor.eval()
         if step < self.initial_random_steps:
             selected_action = np.random.uniform(-1, 1, (self.num_agents, self.action_size))
         else:
@@ -131,10 +119,8 @@ class Agent():
         
         return selected_action
 
-    def reset(self):
-        pass
 
-    def learn(self, experiences):
+    def learn(self, experiences, step):
         """Update policy and value parameters using given batch of experience tuples.
         Q_targets = r + γ * critic_target(next_state, actor_target(next_state))
         where:
@@ -159,8 +145,8 @@ class Agent():
         mask = 1 - done
         critic_01_pred = self.critic_01(state, action)
         critic_02_pred = self.critic_02(state, action)
-        value_target = self.value_target(next_state)
-        q_target = reward + self.gamma * value_target * mask
+        value_target_pred = self.value_target(next_state)
+        q_target = reward + self.gamma * value_target_pred * mask
         critic_01_loss = F.mse_loss(q_target.detach(), critic_01_pred)
         critic_02_loss = F.mse_loss(q_target.detach(), critic_02_pred)
 
@@ -171,13 +157,18 @@ class Agent():
         value_target = critic_pred - alpha * log_prob
         value_loss = F.mse_loss(value_pred, value_target.detach())
         # ---------------------------- update actor ---------------------------- #
-        # Compute actor loss
-        advantage = critic_pred - value_pred.detach()
-        actor_loss = (alpha * log_prob - advantage).mean()
-        # Minimize the loss
-        self.actor_optimizer.zero_grad()
-        actor_loss.backward()
-        self.actor_optimizer.step()
+        if step % self.policy_update == 0:   
+            # Compute actor loss
+            advantage = critic_pred - value_pred.detach()
+            actor_loss = (alpha * log_prob - advantage).mean()
+            # Minimize the loss
+            self.actor_optimizer.zero_grad()
+            actor_loss.backward()
+            self.actor_optimizer.step()
+            self.soft_update(self.value_local, self.value_target)
+        else:
+            actor_loss = torch.zeros(1)
+
         # ---------------------------- update critics -------------------------- #
         self.critic_01_optimizer.zero_grad() 
         critic_01_loss.backward()
@@ -188,10 +179,10 @@ class Agent():
 
         critic_loss = critic_01_loss + critic_02_loss
         # ----------------------- update value network ----------------------- #
-        self.soft_update(self.value_local, self.value_target)
         self.value_optimizer.zero_grad()
         value_loss.backward()
         self.value_optimizer.step()
+
 
     def soft_update(self, local_model, target_model):
         """Soft update model parameters.
@@ -205,53 +196,24 @@ class Agent():
             target_param.data.copy_(self.tau*local_param.data + (1.0-self.tau)*target_param.data)
 
 
-class ReplayBufferOld:
+class ReplayBuffer:
     """Fixed-size buffer to store experience tuples."""
 
-    def __init__(self, action_size, buffer_size, batch_size, seed):
+    def __init__(self, obs_dim: int, action_dim: int, size: int, batch_size: int = 32):
         """Initialize a ReplayBuffer object.
         Params
         ======
             buffer_size (int): maximum size of buffer
             batch_size (int): size of each training batch
         """
-        self.action_size = action_size
-        self.memory = deque(maxlen=buffer_size)  # internal memory (deque)
-        self.batch_size = batch_size
-        self.experience = namedtuple("Experience", field_names=["state", "action", "reward", "next_state", "done"])
-        self.seed = random.seed(seed)
-    
-    def add(self, state, action, reward, next_state, done):
-        """Add a new experience to memory."""
-        e = self.experience(state, action, reward, next_state, done)
-        self.memory.append(e)
-    
-    def sample(self):
-        """Randomly sample a batch of experiences from memory."""
-        experiences = random.sample(self.memory, k=self.batch_size)
 
-        states = torch.from_numpy(np.vstack([e.state for e in experiences if e is not None])).float().to(device)
-        actions = torch.from_numpy(np.vstack([e.action for e in experiences if e is not None])).float().to(device)
-        rewards = torch.from_numpy(np.vstack([e.reward for e in experiences if e is not None])).float().to(device)
-        next_states = torch.from_numpy(np.vstack([e.next_state for e in experiences if e is not None])).float().to(device)
-        dones = torch.from_numpy(np.vstack([e.done for e in experiences if e is not None]).astype(np.uint8)).float().to(device)
-
-        return (states, actions, rewards, next_states, dones)
-
-    def __len__(self):
-        """Return the current size of internal memory."""
-        return len(self.memory)
-
-
-class ReplayBuffer:
-
-    def __init__(self, obs_dim: int, action_dim: int, size: int, batch_size: int = 32):
         self.obs_buf = np.zeros([size, obs_dim], dtype=np.float32)
         self.next_obs_buf = np.zeros([size, obs_dim], dtype=np.float32)
         self.rews_buf = np.zeros([size], dtype=np.float32)
         self.acts_buf = np.zeros([size, action_dim], dtype=np.float32)
         self.done_buf = np.zeros(size, dtype=np.float32)
         self.max_size, self.batch_size = size, batch_size
+        self.action_size = action_dim
         self.ptr, self.size = 0, 0
 
 
@@ -263,7 +225,7 @@ class ReplayBuffer:
         next_obs: np.ndarray,
         done: bool,
     ):
-        """ Store transition """
+        """Add a new experience to memory."""
         self.obs_buf[self.ptr] = obs
         self.acts_buf[self.ptr] = act
         self.rews_buf[self.ptr] = rew
@@ -273,16 +235,16 @@ class ReplayBuffer:
         self.size = min(self.size + 1, self.max_size)
 
     def sample(self):
-        """ Sample from storage"""
+        """Randomly sample a batch of experiences from memory."""
         idx = np.random.choice(self.size, size=self.batch_size, replace=False)
         state = torch.FloatTensor(self.obs_buf[idx]).to(device)
         next_state = torch.FloatTensor(self.next_obs_buf[idx]).to(device)
-        action = torch.FloatTensor(self.acts_buf[idx]).to(device)
-        reward = torch.FloatTensor(self.rews_buf[idx]).to(device)
-        done = torch.FloatTensor(self.done_buf[idx]).to(device)
+        action = torch.FloatTensor(self.acts_buf[idx].reshape(-1, self.action_size)).to(device)
+        reward = torch.FloatTensor(self.rews_buf[idx].reshape(-1, 1)).to(device)
+        done = torch.FloatTensor(self.done_buf[idx].reshape(-1, 1)).to(device)
 
         return (state, next_state, action, reward, done)
 
     def __len__(self):
+        """Return the current size of internal memory."""
         return self.size
-
