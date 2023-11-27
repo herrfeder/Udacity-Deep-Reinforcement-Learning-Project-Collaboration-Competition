@@ -22,8 +22,9 @@ class Agent():
                 "lin_full_con_02": 256,
                 "gamma": 0.99,
                 "tau": 5e-3,
-                "learning_rate": 3e-4,
-            ):
+                "learning_rate": 3e-4 }
+                ):
+        
         """Initialize an Agent object.
         
         Params
@@ -49,11 +50,8 @@ class Agent():
         self.lin_full_con_01 = hyperparameters["lin_full_con_01"]
         self.lin_full_con_02 = hyperparameters["lin_full_con_02"]
         self.learning_rate = hyperparameters["learning_rate"]
-        self.weight_decay = hyperparameters["weight_decay"]
-        self.noise_scalar = hyperparameters["noise_scalar"]
         self.hyperparameters = hyperparameters
         self.policy_update = 2
-        self.initial_random_steps = 100
         self.num_agents = 2
         self.transition =[[]]*self.num_agents
 
@@ -102,17 +100,15 @@ class Agent():
 
     def act(self, state, step):
         """Returns actions for given state as per current policy."""
-        if step < self.initial_random_steps:
-            selected_action = np.random.uniform(-1, 1, (self.num_agents, self.action_size))
-        else:
-            selected_action = []
-            for i in range(self.num_agents):
-                action = self.actor(
-                    torch.FloatTensor(state[i]).to(device)
-                )[0].detach().cpu().numpy()
-                selected_action.append(action)
-            selected_action = np.array(selected_action)
-            selected_action = np.clip(selected_action, -1, 1)
+        
+        selected_action = []
+        for i in range(self.num_agents):
+            action = self.actor(
+                torch.FloatTensor(state[i]).to(device)
+            )[0].detach().cpu().numpy()
+            selected_action.append(action)
+        selected_action = np.array(selected_action)
+        selected_action = np.clip(selected_action, -1, 1)
 
         for i in range(self.num_agents):
             self.transition[i] = [state[i], selected_action[i]]
@@ -151,15 +147,17 @@ class Agent():
         critic_02_loss = F.mse_loss(q_target.detach(), critic_02_pred)
 
         value_pred = self.value_local(state)
-        critic_pred = torch.min(
+        pred_new_q_value = torch.min(
             self.critic_01(state, new_action), self.critic_02(state, new_action)
         )
-        value_target = critic_pred - alpha * log_prob
+        value_target = pred_new_q_value - alpha * log_prob
         value_loss = F.mse_loss(value_pred, value_target.detach())
         # ---------------------------- update actor ---------------------------- #
+        # train the policy function after every second "step", means both playing agents
+        
         if step % self.policy_update == 0:   
             # Compute actor loss
-            advantage = critic_pred - value_pred.detach()
+            advantage = pred_new_q_value - value_pred.detach()
             actor_loss = (alpha * log_prob - advantage).mean()
             # Minimize the loss
             self.actor_optimizer.zero_grad()
@@ -199,52 +197,52 @@ class Agent():
 class ReplayBuffer:
     """Fixed-size buffer to store experience tuples."""
 
-    def __init__(self, obs_dim: int, action_dim: int, size: int, batch_size: int = 32):
+    def __init__(self, state_size, action_size, memory_size, batch_size = 32):
         """Initialize a ReplayBuffer object.
         Params
         ======
-            buffer_size (int): maximum size of buffer
-            batch_size (int): size of each training batch
+            state_size (int): Dimension of Observation space
+            action_size (int): Dimension of Action space
+            memory_size (int): Length of Memory Buffer
+            batch_size (int): size of each training batch (random selection)
         """
 
-        self.obs_buf = np.zeros([size, obs_dim], dtype=np.float32)
-        self.next_obs_buf = np.zeros([size, obs_dim], dtype=np.float32)
-        self.rews_buf = np.zeros([size], dtype=np.float32)
-        self.acts_buf = np.zeros([size, action_dim], dtype=np.float32)
-        self.done_buf = np.zeros(size, dtype=np.float32)
-        self.max_size, self.batch_size = size, batch_size
-        self.action_size = action_dim
-        self.ptr, self.size = 0, 0
+        self.batch_size = batch_size
+        self.memory_size = memory_size
+        self.action_size = action_size
+        self.state_size = state_size
+        self.state_buf = np.zeros([self.memory_size, self.state_size], dtype=np.float32)
+        self.next_state_buf = np.zeros([self.memory_size, self.state_size], dtype=np.float32)
+        self.reward_buf = np.zeros([self.memory_size], dtype=np.float32)
+        self.action_buf = np.zeros([self.memory_size, self.action_size], dtype=np.float32)
+        self.done_buf = np.zeros(self.memory_size, dtype=np.float32)
+        self.ptr = 0
+        self.size = 0
 
-
-    def add(
-        self,
-        obs: np.ndarray,
-        act: np.ndarray,
-        rew: float,
-        next_obs: np.ndarray,
-        done: bool,
-    ):
+    def add(self, state, action, reward, next_state, done):
         """Add a new experience to memory."""
-        self.obs_buf[self.ptr] = obs
-        self.acts_buf[self.ptr] = act
-        self.rews_buf[self.ptr] = rew
-        self.next_obs_buf[self.ptr] = next_obs
+
+        self.state_buf[self.ptr] = state
+        self.action_buf[self.ptr] = action
+        self.reward_buf[self.ptr] = reward
+        self.next_state_buf[self.ptr] = next_state
         self.done_buf[self.ptr] = done
-        self.ptr = (self.ptr + 1) % self.max_size
-        self.size = min(self.size + 1, self.max_size)
+        self.ptr = (self.ptr + 1) % self.memory_size
+        self.size = min(self.size + 1, self.memory_size)
 
     def sample(self):
         """Randomly sample a batch of experiences from memory."""
-        idx = np.random.choice(self.size, size=self.batch_size, replace=False)
-        state = torch.FloatTensor(self.obs_buf[idx]).to(device)
-        next_state = torch.FloatTensor(self.next_obs_buf[idx]).to(device)
-        action = torch.FloatTensor(self.acts_buf[idx].reshape(-1, self.action_size)).to(device)
-        reward = torch.FloatTensor(self.rews_buf[idx].reshape(-1, 1)).to(device)
+
+        idx = np.random.choice(self.memory_size, size=self.batch_size, replace=False)
+        state = torch.FloatTensor(self.state_buf[idx]).to(device)
+        next_state = torch.FloatTensor(self.next_state_buf[idx]).to(device)
+        action = torch.FloatTensor(self.action_buf[idx].reshape(-1, self.action_size)).to(device)
+        reward = torch.FloatTensor(self.reward_buf[idx].reshape(-1, 1)).to(device)
         done = torch.FloatTensor(self.done_buf[idx].reshape(-1, 1)).to(device)
 
         return (state, next_state, action, reward, done)
 
     def __len__(self):
         """Return the current size of internal memory."""
+        
         return self.size

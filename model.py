@@ -22,8 +22,6 @@ class Actor(nn.Module):
             fc2_units (int): Number of nodes in second hidden layer
         """
         super(Actor, self).__init__()
-        self.log_std_min = -20
-        self.log_std_max = 2
         self.noise = noise
         self.fc1 = nn.Linear(state_size, fc1_units)
         self.fc2 = nn.Linear(fc1_units, fc2_units)
@@ -42,12 +40,7 @@ class Actor(nn.Module):
     def sample_normal(self, state):
         
         mu = self.mu(state).tanh()
-        # maybe add log_std scaling
         log_std = self.sigma(state).tanh()
-        #log_std = self.log_std_min  + 0.5 * (
-        #    self.log_std_max - self.log_std_min
-        #    ) * (log_std + 1)
- 
         std = torch.exp(log_std)
 
         dist = torch.distributions.Normal(mu, std)
