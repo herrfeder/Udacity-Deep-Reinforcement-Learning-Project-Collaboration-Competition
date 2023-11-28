@@ -11,18 +11,25 @@ def hidden_init(layer):
 class Actor(nn.Module):
     """Actor (Policy) Model."""
 
-    def __init__(self, state_size, action_size, seed=0, noise=1e-7, fc1_units=256, fc2_units=256):
+    def __init__(self, state_size, action_size, 
+                 seed=0, epsilon=1e-7, fc1_units=256,
+                 fc2_units=256, log_std_min=-20, log_std_max=2
+                ):
         """Initialize parameters and build model.
         Params
         ======
             state_size (int): Dimension of each state
             action_size (int): Dimension of each action
-            noise (float): Noise for logistic probility of action
+            seed (int): seed for initializing pseudo number generators
+            epsilon (float): Epsilon Decay factor
             fc1_units (int): Number of nodes in first hidden layer
             fc2_units (int): Number of nodes in second hidden layer
         """
         super(Actor, self).__init__()
-        self.noise = noise
+        self.seed = torch.manual_seed(seed)
+        self.epsilon = epsilon
+        self.log_std_min = log_std_min
+        self.log_std_max = log_std_max
         self.fc1 = nn.Linear(state_size, fc1_units)
         self.fc2 = nn.Linear(fc1_units, fc2_units)
         self.mu = nn.Linear(fc2_units, action_size)
@@ -38,16 +45,19 @@ class Actor(nn.Module):
         self.sigma.bias.data.uniform_(-3e-3, 3e-3)
 
     def sample_normal(self, state):
-        
         mu = self.mu(state).tanh()
         log_std = self.sigma(state).tanh()
+        # clamp the log standard deviation to be be in a balanced range
+        log_std = torch.clamp(log_std, self.log_std_min, self.log_std_max)  
         std = torch.exp(log_std)
 
         dist = torch.distributions.Normal(mu, std)
+        # the sum of all discrete terms in samples of distribution
         z = dist.rsample()
+        # activate z to get action in range of -1 and 1  
         action = z.tanh()
         
-        log_prob = dist.log_prob(z) - torch.log(1 - action.pow(2) + self.noise)
+        log_prob = dist.log_prob(z) - torch.log(1 - action.pow(2) + self.epsilon)
         log_prob = log_prob.sum(-1, keepdim=True)
 
         return action, log_prob

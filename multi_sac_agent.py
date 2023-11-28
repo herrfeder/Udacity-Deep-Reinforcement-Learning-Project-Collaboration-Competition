@@ -16,13 +16,15 @@ class Agent():
     def __init__(
             self, state_size, action_size, random_seed,
             hyperparameters={
-                "buffer_size": int(1e5),
+                "buffer_size": 10000,
                 "batch_size": 64,
                 "lin_full_con_01": 256,
                 "lin_full_con_02": 256,
                 "gamma": 0.99,
                 "tau": 5e-3,
-                "learning_rate": 3e-4 }
+                "learning_rate": 3e-4,
+                "initial_rand_steps": 500,
+                "policy_update": 2}
                 ):
         
         """Initialize an Agent object.
@@ -32,6 +34,7 @@ class Agent():
             state_size (int): dimension of each state
             action_size (int): dimension of each action
             random_seed (int): random seed
+            Hyperparameters (dict): consists of the following parameters ->
             buffer_size (int): replay buffer size
             batch_size (int): minibatch size
             lin_full_con_01 (int): Output Length first Fully Connected Layer
@@ -39,6 +42,8 @@ class Agent():
             gamma (float): discount factor
             tau (float): interpolation factor for soft update of target parameters
             learning_rate (float): learning rate for models
+            initial_rand_steps (int): Number of steps the action is sampled from random dist
+            policy_update (int): every n-Steps the Agent/Policy Network gets updated
         """
         self.state_size = state_size
         self.action_size = action_size
@@ -50,8 +55,9 @@ class Agent():
         self.lin_full_con_01 = hyperparameters["lin_full_con_01"]
         self.lin_full_con_02 = hyperparameters["lin_full_con_02"]
         self.learning_rate = hyperparameters["learning_rate"]
+        self.initial_rand_steps = hyperparameters["initial_rand_steps"]
+        self.policy_update = hyperparameters["policy_update"]
         self.hyperparameters = hyperparameters
-        self.policy_update = 2
         self.num_agents = 2
         self.transition =[[]]*self.num_agents
 
@@ -59,7 +65,8 @@ class Agent():
         self.actor = Actor(state_size, action_size, fc1_units=self.lin_full_con_01, fc2_units=self.lin_full_con_02).to(device)
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=self.learning_rate)
 
-        # Critics (One per agent)
+        # Q-Networks (Critics)
+        # we have two Q Networks as it is a good mitigation for overestimation of Q-Networks
         self.critic_01 = CriticQ((self.state_size+self.action_size), seed=self.seed, fc1_units=self.lin_full_con_01, fc2_units=self.lin_full_con_02).to(device)
         self.critic_02 = CriticQ((self.state_size+self.action_size), seed=self.seed, fc1_units=self.lin_full_con_01, fc2_units=self.lin_full_con_02).to(device)
         self.critic_01_optimizer = optim.Adam(self.critic_01.parameters(), lr=self.learning_rate)
@@ -71,18 +78,15 @@ class Agent():
         self.hard_copy_weights(self.value_target, self.value_local)
         self.value_optimizer = optim.Adam(self.value_local.parameters(), lr=self.learning_rate)
 
-        # Logarithmic Tensor
-        self.target_alpha = -np.prod((self.action_size,)).item()
-        self.log_alpha = torch.zeros(1, requires_grad=True, device=device)
-        self.log_optimizer = optim.Adam([self.log_alpha], lr=self.learning_rate)
-
         # Replay memory
         self.memory = ReplayBuffer(self.state_size, self.action_size, self.buffer_size, self.batch_size)
     
     def load_checkpoints(self):
         self.actor_local.load_state_dict(torch.load('checkpoint_actor.pth'))
-        self.critic_local.load_state_dict(torch.load('checkpoint_critic.pth'))
-    
+        self.critic_01.load_state_dict(torch.load('checkpoint_critic_01.pth'))
+        self.critic_02.load_state_dict(torch.load('checkpoint_critic_02.pth'))
+        self.value_local.load_state_dict(torch.load('checkpoint_value_local.pth'))
+
     def hard_copy_weights(self, target, source):
         """ copy weights from source to target network (part of initialization)"""
         for target_param, param in zip(target.parameters(), source.parameters()):
@@ -90,6 +94,7 @@ class Agent():
     
     def step(self, state, action, reward, next_state, done, timestep):
         """Save experience in replay memory, and use random sample from buffer to learn."""
+        
         for i in range(self.num_agents):
             self.transition[i] += [reward[i], next_state[i], done[i]]
             self.memory.add(*self.transition[i])
@@ -101,89 +106,80 @@ class Agent():
     def act(self, state, step):
         """Returns actions for given state as per current policy."""
         
-        selected_action = []
-        for i in range(self.num_agents):
-            action = self.actor(
-                torch.FloatTensor(state[i]).to(device)
-            )[0].detach().cpu().numpy()
-            selected_action.append(action)
-        selected_action = np.array(selected_action)
-        selected_action = np.clip(selected_action, -1, 1)
+        # OpenAI describes it here https://spinningup.openai.com/en/latest/algorithms/sac.html
+        # as a "trick" to improve exploration in the beginning by sampling the selected action
+        # from a uniform random distribution
+        if step < self.initial_rand_steps:
+            selected_action = np.random.uniform(-1, 1, (self.num_agents, self.action_size))
+        else: 
+            selected_action = []
+            for i in range(self.num_agents):
+                action = self.actor(
+                    torch.FloatTensor(state[i]).to(device)
+                )[0].detach().cpu().numpy()
+                selected_action.append(action)
+            selected_action = np.array(selected_action)
+            selected_action = np.clip(selected_action, -1, 1)
 
         for i in range(self.num_agents):
             self.transition[i] = [state[i], selected_action[i]]
-        
+    
         return selected_action
 
 
     def learn(self, experiences, step):
         """Update policy and value parameters using given batch of experience tuples.
-        Q_targets = r + γ * critic_target(next_state, actor_target(next_state))
-        where:
-            actor_target(state) -> action
-            critic_target(state, action) -> Q-value
         Params
         ======
-            experiences (Tuple[torch.Tensor]): tuple of (s, a, r, s', done) tuples 
-            gamma (float): discount factor
+            experiences (Tuple[torch.Tensor]): tuple of (s, s', a, r, done) tuples 
+            step (int): Timestep over all episodes
         """
         state, next_state, action, reward, done = experiences
+        # predict new action and output probability for this action
         new_action, log_prob = self.actor(state)
-        # ---------------------------- update probability function ------------- #
-        alpha_loss = (
-            -self.log_alpha.exp() * (log_prob + self.target_alpha).detach()
-        ).mean()
-        self.log_optimizer.zero_grad()
-        alpha_loss.backward()
-        self.log_optimizer.step()
-        # ---------------------------- calculate losses ------------------------ #
-        alpha = self.log_alpha.exp()
-        mask = 1 - done
+
+        # ----------- Training Q Function (update critics) ------------------- #
         critic_01_pred = self.critic_01(state, action)
         critic_02_pred = self.critic_02(state, action)
         value_target_pred = self.value_target(next_state)
-        q_target = reward + self.gamma * value_target_pred * mask
-        critic_01_loss = F.mse_loss(q_target.detach(), critic_01_pred)
-        critic_02_loss = F.mse_loss(q_target.detach(), critic_02_pred)
-
-        value_pred = self.value_local(state)
-        pred_new_q_value = torch.min(
-            self.critic_01(state, new_action), self.critic_02(state, new_action)
-        )
-        value_target = pred_new_q_value - alpha * log_prob
-        value_loss = F.mse_loss(value_pred, value_target.detach())
-        # ---------------------------- update actor ---------------------------- #
-        # train the policy function after every second "step", means both playing agents
-        
-        if step % self.policy_update == 0:   
-            # Compute actor loss
-            advantage = pred_new_q_value - value_pred.detach()
-            actor_loss = (alpha * log_prob - advantage).mean()
-            # Minimize the loss
-            self.actor_optimizer.zero_grad()
-            actor_loss.backward()
-            self.actor_optimizer.step()
-            self.soft_update(self.value_local, self.value_target)
-        else:
-            actor_loss = torch.zeros(1)
-
-        # ---------------------------- update critics -------------------------- #
+        target_q_value = reward + self.gamma * value_target_pred * (1 - done)
+        critic_01_loss = F.mse_loss(target_q_value.detach(), critic_01_pred)
+        critic_02_loss = F.mse_loss(target_q_value.detach(), critic_02_pred)
         self.critic_01_optimizer.zero_grad() 
         critic_01_loss.backward()
         self.critic_01_optimizer.step()
         self.critic_02_optimizer.zero_grad() 
         critic_02_loss.backward()
-        self.critic_02_optimizer.step()
+        self.critic_02_optimizer.step() 
+        # we extract the minimum from both Q-Networks to get the best prediction
+        pred_new_q_value = torch.min(
+            self.critic_01(state, new_action), self.critic_02(state, new_action)
+        )
 
-        critic_loss = critic_01_loss + critic_02_loss
         # ----------------------- update value network ----------------------- #
+        value_pred = self.value_local(state)
+        value_target = pred_new_q_value - log_prob
+        value_loss = F.mse_loss(value_pred, value_target.detach())
         self.value_optimizer.zero_grad()
         value_loss.backward()
         self.value_optimizer.step()
 
+        # --------------- Training Policy Net (update actor) ----------------- #
+        # update the policy network after every n "step"
+        if step % self.policy_update == 0:   
+            # Compute actor loss using Kullback-Leibler Divergence 
+            actor_loss = (log_prob - pred_new_q_value).mean()
+            # Minimize the loss
+            self.actor_optimizer.zero_grad()
+            actor_loss.backward()
+            self.actor_optimizer.step()
+            # update also the target value network only after n policy_update steps
+            # to maintain time delay
+            self.soft_update(self.value_local, self.value_target)
+
 
     def soft_update(self, local_model, target_model):
-        """Soft update model parameters.
+        """Soft update model parameters using polyak averaging
         θ_target = τ*θ_local + (1 - τ)*θ_target
         Params
         ======
