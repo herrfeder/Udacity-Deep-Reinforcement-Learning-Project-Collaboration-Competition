@@ -23,7 +23,7 @@ class Agent():
                 "gamma": 0.99,
                 "tau": 5e-3,
                 "learning_rate": 3e-4,
-                "initial_rand_steps": 500,
+                "initial_rand_steps": 100,
                 "policy_update": 2}
                 ):
         
@@ -163,7 +163,6 @@ class Agent():
         self.value_optimizer.zero_grad()
         value_loss.backward()
         self.value_optimizer.step()
-
         # --------------- Training Policy Net (update actor) ----------------- #
         # update the policy network after every n "step"
         if step % self.policy_update == 0:   
@@ -173,10 +172,7 @@ class Agent():
             self.actor_optimizer.zero_grad()
             actor_loss.backward()
             self.actor_optimizer.step()
-            # update also the target value network only after n policy_update steps
-            # to maintain time delay
             self.soft_update(self.value_local, self.value_target)
-
 
     def soft_update(self, local_model, target_model):
         """Soft update model parameters using polyak averaging

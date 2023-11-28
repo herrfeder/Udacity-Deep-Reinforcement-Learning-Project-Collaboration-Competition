@@ -32,26 +32,32 @@ class Actor(nn.Module):
         self.log_std_max = log_std_max
         self.fc1 = nn.Linear(state_size, fc1_units)
         self.fc2 = nn.Linear(fc1_units, fc2_units)
-        self.mu = nn.Linear(fc2_units, action_size)
-        self.sigma = nn.Linear(fc2_units, action_size)
+        self.mean_layer = nn.Linear(fc2_units, action_size)
+        self.log_std_layer = nn.Linear(fc2_units, action_size)
         self.reset_parameters()
 
     def reset_parameters(self):
         self.fc1.weight.data.uniform_(*hidden_init(self.fc1))
         self.fc2.weight.data.uniform_(*hidden_init(self.fc2))
-        self.mu.weight.data.uniform_(-3e-3, 3e-3)
-        self.mu.bias.data.uniform_(-3e-3, 3e-3)
-        self.sigma.weight.data.uniform_(-3e-3, 3e-3)
-        self.sigma.bias.data.uniform_(-3e-3, 3e-3)
+        self.mean_layer.weight.data.uniform_(-3e-3, 3e-3)
+        self.mean_layer.bias.data.uniform_(-3e-3, 3e-3)
+        self.log_std_layer.weight.data.uniform_(-3e-3, 3e-3)
+        self.log_std_layer.bias.data.uniform_(-3e-3, 3e-3)
 
     def sample_normal(self, state):
-        mu = self.mu(state).tanh()
-        log_std = self.sigma(state).tanh()
+        """Instead of returning results of activation in SAC the Policy Network
+        will sample the resulting action from a normal distribution.
+        The Result will be a action and a log probability for this"""
+
+        mean = self.mean_layer(state).tanh()
+        log_std = self.log_std_layer(state).tanh()
         # clamp the log standard deviation to be be in a balanced range
         log_std = torch.clamp(log_std, self.log_std_min, self.log_std_max)  
+        # get positive standard deviation
         std = torch.exp(log_std)
 
-        dist = torch.distributions.Normal(mu, std)
+        # create normal distribution from mean and standard deviation 
+        dist = torch.distributions.Normal(mean, std)
         # the sum of all discrete terms in samples of distribution
         z = dist.rsample()
         # activate z to get action in range of -1 and 1  
@@ -71,7 +77,7 @@ class Actor(nn.Module):
 
 
 class Critic(nn.Module):
-    """Critic (Value) Model."""
+    """Critic base Model."""
 
     def __init__(self, input_dim, seed=0, fc1_units=128, fc2_units=128):
         """Initialize parameters and build model.
@@ -98,7 +104,7 @@ class Critic(nn.Module):
 
 
 class CriticQ(Critic):
-    """Critic (Value) Model."""
+    """Critic (Q-Function) Model."""
 
     def __init__(self, input_dim, seed=0, fc1_units=128, fc2_units=128):
         """Initialize parameters and build model.
@@ -122,7 +128,7 @@ class CriticQ(Critic):
 
 
 class Value(Critic):
-    """Critic (Value) Model."""
+    """Value Model."""
 
     def __init__(self, input_dim, seed=0, fc1_units=128, fc2_units=128):
         """Initialize parameters and build model.
