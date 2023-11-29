@@ -22,9 +22,9 @@ def init_environment(hyperparameters=""):
     state_size = states.shape[1]
     # initialize agent with environment facts and hyperparameters for actor critic model components
     if hyperparameters:
-        agent = Agent(state_size=state_size, action_size=action_size, random_seed=0, hyperparameters=hyperparameters)
+        agent = Agent(state_size=state_size, action_size=action_size, random_seed=0, num_agents=num_agents, hyperparameters=hyperparameters)
     else:
-        agent = Agent(state_size=state_size, action_size=action_size, random_seed=0)
+        agent = Agent(state_size=state_size, action_size=action_size, random_seed=0, num_agents=num_agents)
     init_output = \
     """##Reacher Environment##
 

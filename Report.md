@@ -4,50 +4,63 @@ I used the Tennis Unity Environment which is a Multi-Agent Environment with **tw
 The hyperparameters where choosen with some assumptions but in the end the best results where found by trying different combinations. There are some tricks (like initial random action steps) , for example mentioned by OpenAI in their SAC documentation, which obviously will speed up the training process. I tried to stay as basic as possible and tried to avoid as many "tricks" while having feasible training results.
 
 ```
-##Reacher Environment##
+##Tennis Environment##
 
-# Environment Details
-- Number of Agents: 1
-- Size of Action (Continuous): 4 
-- Number of state variables: 33
-
-# Hyper Parameters
-{'batch_size': 256,
- 'buffer_size': 100000,
- 'gamma': 0.99,
- 'lin_full_con_01': 128,
- 'lin_full_con_02': 128,
- 'lr_actor': 0.001,
- 'lr_critic': 0.001,
- 'noise_scalar': 0.25,
- 'tau': 0.001,
- 'weight_decay': 0}
+# Environment Details                                                                                                                                                                                              
+- Number of Agents: 2                                                                                                                                                                                              
+- Size of Action (Continuous): 2                                                                                                                                                                                   
+- Number of state variables: 24                                                                                                                                                                                    
+                                                                                                                                                                                                                   
+# Hyper Parameters                                                                                                                                                                                                 
+{'batch_size': 64,                                                                                                                                                                                                 
+ 'buffer_size': 10000,                                                                                                                                                                                             
+ 'entropy_weight': 0.00025,                                                                                                                                                                                        
+ 'gamma': 0.99,                                                                                                                                                                                                    
+ 'initial_rand_steps': 100,                                                                                                                                                                                        
+ 'learning_rate': 0.0003,                                                                                                                                                                                          
+ 'lin_full_con_01': 256,                                                                                                                                                                                           
+ 'lin_full_con_02': 256,                                                                                                                                                                                           
+ 'policy_update': 2,                                                                                                                                                                                               
+ 'tau': 0.005}
 ```
 
   * The training was done with a `Intel(R) Xeon(R) CPU E5-2630 v4 @ 2.20GHz` in a headless VPS Machine.
-  * It took about 6 hours and 252 episodes to finish the training successfully:
+  * It took about 2 hours and 887 episodes to finish the training successfully:
   
 ![](images/screenshot_finished_training.png)
 
 ![](images/sac_training_diagram.png)
 
-# Important Parts
+# Used Code
 
-I've used the [ddpg-pendulum](https://github.com/udacity/deep-reinforcement-learning/tree/master/ddpg-pendulum) example as the basis for my implementation. The biggest part of this example is used without further modification.
+I've used the [ddpg-pendulum](https://github.com/udacity/deep-reinforcement-learning/tree/master/ddpg-pendulum) example as the skeleton for my implementation and tried to convert it for using a Multi-Agent-SAC instead of a DDPG for a single agent. I used the following sources to collect ideas and implement my version, that was able to reach the desired Reward:
 
-## DDPG Algorithm
+  * https://github.com/MrSyee/pg-is-all-you-need
+  * https://spinningup.openai.com/en/latest/algorithms/sac.html
+  * https://towardsdatascience.com/soft-actor-critic-demystified-b8427df61665
 
-The Deep Deterministic Policy Gradient (DDPG) is a Off-Policy-Algorithm which leverages Q-Learning to learn an optimal policy. A DDPG is composed of two networks : one actor and one critic. The actor can be seen as the Policy Network and the critic as the Value network. Both are used together to calculate the next-state Q-Values and the critic will try minimize the loss between the updated and the original Q value. With this information the actor will try to maxize the expected return by optimizing the policy.
+## SAC Algorithm
+
+The Soft Actor-Critic (Algorithm) is a Off-Policy-Algorithm which leverages Q-Learning to learn an optimal policy. 
+In contrast to DDPG, the SAC algorithm tries to maximize the reward while also maximizing the entropy of the resulting policy to have the optimal tradeoff between exploration and learning stability. To measure the optimal amount of entropy, the Kullback-Lieber Divergence is used. (Great Article about KL-Divergence in SAC -> https://towardsdatascience.com/entropy-in-soft-actor-critic-part-2-59821bdd5671)
+The most important parameter to control this tradeoff is the temperature parameter Alpha, which can also be learned during environment training and treated as a dynamic value. (As stated here: https://arxiv.org/pdf/1812.05905.pdf). To keep things simple I treat this Alpha as a static hyperparameter.
+
+The actor can be seen as the Policy Network, the critic as the Network to approximate the Q-Function ... value
+In this implemention two parallel Critics for the Q-Network are used to handle the problems of overestimation. 
+
+"""
+Both are used together to calculate the next-state Q-Values and the critic will try minimize the loss between the updated and the original Q value. With this information the actor will try to maxize the expected return by optimizing the policy.
 Both elements have additional target networks, which can be seen as time-delayed representations of the actor/critic local network. Isolate the local and the target and soft updating the target networks helps in improving learning performance and preventing divergence.
-For applying actual deep learning, we need some kind of Buffer, from with training data can be sampled. This is done using a Replay Buffer.
-To assist the exploration of the agent an additional noise component is introduced that can be quite complex, to have the right amount of "disturbance". (I used a single static value instead, see below)
+"""
+
+For applying actual deep learning, we need some kind of Buffer, from with training data can be sampled. This is done using a Replay Buffer. One "row" of data is a tuple of `(state, next_state, action, reward, done)`. 
 
 The training and learning is happening in steps over the episodes happening in the environment.
   * Initially, when starting:
-    * the actor and critic networks are initialised with random weights
-    *  he Replay Buffer gets initialised
+    * the actor, value and critic networks are initialised with random weights
+    * the Replay Buffer gets initialised
   * For the beginning of every episode:
-    * the noise process gets initialised for a fresh start
+    * 
   * During each step of a episode:
     * according to the current policy an action is executed, the reward and and the next state gets collected
     * each step we are storing actions and states into the Replay Buffer and take a sample from it
