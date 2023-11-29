@@ -109,17 +109,17 @@ class Agent():
         # OpenAI describes it here https://spinningup.openai.com/en/latest/algorithms/sac.html
         # as a "trick" to improve exploration in the beginning by sampling the selected action
         # from a uniform random distribution
-        if step < self.initial_rand_steps:
-            selected_action = np.random.uniform(-1, 1, (self.num_agents, self.action_size))
-        else: 
-            selected_action = []
-            for i in range(self.num_agents):
-                action = self.actor(
-                    torch.FloatTensor(state[i]).to(device)
-                )[0].detach().cpu().numpy()
-                selected_action.append(action)
-            selected_action = np.array(selected_action)
-            selected_action = np.clip(selected_action, -1, 1)
+        #if step < self.initial_rand_steps:
+        #    selected_action = np.random.uniform(-1, 1, (self.num_agents, self.action_size))
+        #else: 
+        selected_action = []
+        for i in range(self.num_agents):
+            action = self.actor(
+                torch.FloatTensor(state[i]).to(device)
+            )[0].detach().cpu().numpy()
+            selected_action.append(action)
+        selected_action = np.array(selected_action)
+        selected_action = np.clip(selected_action, -1, 1)
 
         for i in range(self.num_agents):
             self.transition[i] = [state[i], selected_action[i]]

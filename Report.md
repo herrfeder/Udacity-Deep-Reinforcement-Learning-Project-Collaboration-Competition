@@ -1,7 +1,7 @@
 # Training Specs
 
-I used the Reacher Unity Environment leveraging only **one training agent**. As the training process took several hours it was much more handy for me to run the training in a headless environment via a python script instead a jupyter notebook.
-The hyperparameters where choosen with some assumptions but in the end the best results where found by trying different combinations:
+I used the Tennis Unity Environment which is a Multi-Agent Environment with **two competing agents**. As the training process took several hours it was much more handy for me to run the training in a headless environment via a python script instead a jupyter notebook.
+The hyperparameters where choosen with some assumptions but in the end the best results where found by trying different combinations. There are some tricks (like initial random action steps) , for example mentioned by OpenAI in their SAC documentation, which obviously will speed up the training process. I tried to stay as basic as possible and tried to avoid as many "tricks" while having feasible training results.
 
 ```
 ##Reacher Environment##
