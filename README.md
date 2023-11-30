@@ -25,8 +25,8 @@ The training will be done in a headless python environment instead of a jupyter 
 
 ## Included important files
 
-  * `run_trained_sac_models.ipynb`: Compare visually a random action DDPG-Agent with a trained Agent using Unity environment with visual frontend -> [Linux Environment](https://s3-us-west-1.amazonaws.com/udacity-drlnd/P2/Reacher/one_agent/Reacher_Linux.zip)
-  * `train_sac_headless.py`: Training script to run on a headless server with non visual Unity environment -> [Linux Headless Environment](https://s3-us-west-1.amazonaws.com/udacity-drlnd/P2/Reacher/one_agent/Reacher_Linux_NoVis.zip)
+  * `run_trained_sac_models.ipynb`: Compare visually a random action SAC-Agent with a trained Agent using Unity environment with visual frontend -> [Linux Environment](https://s3-us-west-1.amazonaws.com/udacity-drlnd/P3/Tennis/Tennis_Linux.zip)
+  * `train_sac_headless.py`: Training script to run on a headless server with non visual Unity environment -> [Linux Headless Environment](https://s3-us-west-1.amazonaws.com/udacity-drlnd/P3/Tennis/Tennis_Linux_NoVis.zip)
   * `multi_sac_agent.py`: includes the class for the agent, that initialises the models and acts and learns (with the initialised models) against the given Unity environment
   * `model.py`: has the Pytorch-based architectures for the Actor, the Value and the Critic network
   * `*.pth`: the checkpoint weights for the the models that reached a consecutive reward of +0.5 over 100 episodes

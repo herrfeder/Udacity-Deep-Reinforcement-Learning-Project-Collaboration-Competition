@@ -47,7 +47,8 @@ class Actor(nn.Module):
     def sample_normal(self, state):
         """Instead of returning results of activation in SAC the Policy Network
         will sample the resulting action from a normal distribution.
-        The Result will be a action and a log probability for this"""
+        The Result will be a action and a log probability for this
+        This method is called the reparametrisation trick"""
 
         mean = self.mean_layer(state).tanh()
         log_std = self.log_std_layer(state).tanh()
