@@ -24,7 +24,6 @@ class Agent():
                 "tau": 5e-3,
                 "learning_rate": 3e-4,
                 "initial_rand_steps": 100,
-                "policy_update": 2,
                 "entropy_weight": 25e-5}
                 ):
         
@@ -44,8 +43,7 @@ class Agent():
             tau (float): interpolation factor for soft update of target parameters
             learning_rate (float): learning rate for models
             initial_rand_steps (int): Number of steps the action is sampled from random dist
-            policy_update (int): every n-Steps the Agent/Policy Network gets updated
-            entropy_weight (int): Factor to influence the entropy added to actor loss
+            entropy_weight (int): Factor Alpha to influence the entropy added to actor loss
         """
         self.state_size = state_size
         self.action_size = action_size
@@ -58,7 +56,6 @@ class Agent():
         self.lin_full_con_02 = hyperparameters["lin_full_con_02"]
         self.learning_rate = hyperparameters["learning_rate"]
         self.initial_rand_steps = hyperparameters["initial_rand_steps"]
-        self.policy_update = hyperparameters["policy_update"]
         self.static_alpha = hyperparameters["entropy_weight"]
         self.hyperparameters = hyperparameters
         self.num_agents = num_agents
@@ -165,18 +162,17 @@ class Agent():
         value_loss = F.mse_loss(value_pred, value_target.detach())
         self.value_optimizer.zero_grad()
         value_loss.backward()
+        self.value_optimizer.step()
+
         # --------------- Training Policy Net (update actor) ----------------- #
-        # update the policy network after every n "step"
-        if step % self.policy_update == 0:   
-            # Compute actor loss using Kullback-Leibler Divergence 
-            difference_v_q = pred_new_q_value - value_pred.detach()
-            actor_loss = (self.static_alpha*log_prob - difference_v_q).mean()
-            # Minimize the loss
-            self.actor_optimizer.zero_grad()
-            actor_loss.backward()
-            self.actor_optimizer.step()
-            self.soft_update(self.value_local, self.value_target)
-            self.value_optimizer.step()
+        # Compute actor loss using Kullback-Leibler Divergence 
+        difference_v_q = pred_new_q_value - value_pred.detach()
+        actor_loss = (self.static_alpha*log_prob - difference_v_q).mean()
+        # Minimize the loss
+        self.actor_optimizer.zero_grad()
+        actor_loss.backward()
+        self.actor_optimizer.step()
+        self.soft_update(self.value_local, self.value_target)
 
     def soft_update(self, local_model, target_model):
         """Soft update model parameters using polyak averaging
