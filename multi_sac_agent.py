@@ -82,7 +82,7 @@ class Agent():
         self.memory = ReplayBuffer(self.state_size, self.action_size, self.buffer_size, self.batch_size)
     
     def load_checkpoints(self):
-        self.actor_local.load_state_dict(torch.load('checkpoint_actor.pth'))
+        self.actor.load_state_dict(torch.load('checkpoint_actor.pth'))
         self.critic_01.load_state_dict(torch.load('checkpoint_critic_01.pth'))
         self.critic_02.load_state_dict(torch.load('checkpoint_critic_02.pth'))
         self.value_local.load_state_dict(torch.load('checkpoint_value_local.pth'))
