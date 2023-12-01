@@ -5,6 +5,7 @@
 |--------------------------------------|--------------------------------------|
 | ![](images/random_tennis.gif) | ![](images/trained_tennis.gif) | 
 
+> Please see the [Report](https://github.com/herrfeder/Udacity-Deep-Reinforcement-Learning-Project-Collaboration-Competition/blob/main/Report.md) for detailed description of my approach.
 
 ## Introduction
 
